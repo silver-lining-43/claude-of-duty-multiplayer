@@ -1,3 +1,2 @@
-// Set this to your deployed HTTPS room server before publishing. GitHub Pages
-// hosts the game files but cannot host the WebSocket room server itself.
-export const ROOM_SERVER_URL = '';
+// Shared public room server. Players do not need their own Cloudflare account.
+export const ROOM_SERVER_URL = 'https://claude-of-duty-rooms.jasonngeckert.workers.dev';

@@ -987,6 +987,28 @@ export class EnemyManager {
     }
   }
 
+  // Remove the entire bot population from scene, crowd, targeting and HUD
+  // lists in multiplayer. Retain shared assets for remote human avatars.
+  setEnabled(enabled) {
+    if (!enabled && !this.suspendedEnemies) {
+      this.suspendedEnemies = this.enemies;
+      this.enemies = [];
+      for (const enemy of this.suspendedEnemies) {
+        if (enemy.agent) this.navigation.crowd.removeAgent(enemy.agent);
+        enemy.agent = null;
+        enemy.root.removeFromParent();
+        enemy.currentTarget = null;
+      }
+    } else if (enabled && this.suspendedEnemies) {
+      this.enemies = this.suspendedEnemies;
+      this.suspendedEnemies = null;
+      for (const enemy of this.enemies) {
+        this.scene.add(enemy.root);
+        enemy.spawnAt(enemy.spawnPoint);
+      }
+    }
+  }
+
   get aliveCount() {
     return this.enemies.reduce((count, enemy) => count + Number(!enemy.dead), 0);
   }
@@ -1278,11 +1300,12 @@ export class EnemyManager {
   }
 
   dispose() {
-    for (const enemy of this.enemies) {
+    for (const enemy of [...this.enemies, ...(this.suspendedEnemies ?? [])]) {
       if (enemy.agent) this.navigation.crowd.removeAgent(enemy.agent);
       enemy.root.removeFromParent();
     }
     this.enemies.length = 0;
+    this.suspendedEnemies = null;
   }
 }
 

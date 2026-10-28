@@ -321,16 +321,30 @@ rather than the original engine collision.
 ## Multiplayer foundation (movement only)
 
 Single-player remains the default, with the original six AI bots and combat.
-Open **Multiplayer** on the title screen, enter the room server URL, then choose
-**Create Room** or enter the eight-character code and choose **Join Room**.
-GitHub Pages alone cannot provide online multiplayer: it only serves static files.
-You must also run a separate WebSocket room backend. No backend has been deployed
-as part of this change. On public sites the server field stays empty until configured;
-it never defaults to a server on each visitor's own computer.
-Share both the server URL and room code with your friend. Once connected, click
-to play. Escape opens the pause menu, including **Leave room / Single player**.
-Rooms support two players. Bots, local shooting and the match clock are disabled
-while in a room. The status bar shows the room code and connection status.
+Open **Multiplayer** on the title screen. Everyone uses the shared server at
+https://claude-of-duty-rooms.jasonngeckert.workers.dev by default: visitors do
+not need to fork this project, host a server or create a Cloudflare account.
+That address hosts many independent rooms, with two players per room.
+The operator maintains the server and its hosting account.
+
+Enter a code such as FRIENDS and choose **Create Room**. Codes allow 3–16 letters,
+numbers or hyphens and ignore letter case. Leave the field blank to generate a
+code instead. If a code already exists, join it or choose another one; creating
+never replaces an existing room. Share the code and game link with your friend,
+who enters the same code and chooses **Join Room**. Once connected, click to play.
+The **Advanced: custom server** section is optional, for developers or alternate
+hosts. Codes identify rooms within the selected server, not across all servers.
+
+**Back to main menu** leaves a room and restores single-player bots. From a bot
+match, it opens the menu without respawning the player. Multiplayer removes bots
+from the scene, navigation crowd, radar and hit-target lists entirely; shared
+character assets remain available to render humans. Rooms disable shooting and
+the match clock. The status bar shows the room code and connection status.
+
+GitHub Pages hosts the game files; the separate Worker hosts online rooms.
+Deploy the updated Worker and frontend together when enabling chosen room codes.
+The older Worker only generates random codes; the client reports if that server
+needs updating rather than silently using a different code.
 
 Local development (Node 22+, Chrome or Edge):
 
@@ -380,7 +394,8 @@ may disconnect a client, which rejoins when its timers resume.
 
 ### Protocol and next stage
 
-`POST /rooms` creates a random room code; `GET /rooms/CODE?token=UUID` upgrades
+`POST /rooms` accepts an optional `{code}` JSON body (sent as text/plain to avoid
+a browser preflight), or generates a random room code; `GET /rooms/CODE?token=UUID` upgrades
 to WebSocket. Protocol v1 supports server `welcome`, `state`, and `leave`
 messages and client `{v:1,type:'state',seq,state}` messages only. State carries
 feet position, yaw, moving/sprint/crouch/grounded flags and weapon ID. The server

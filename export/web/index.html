@@ -90,6 +90,9 @@
     width: min(720px, 92vw); display: flex; flex-direction: column;
     align-items: center; gap: 28px;
   }
+  #blocker:has(#multiplayer-menu[open]) .fe-content { max-height: calc(100dvh - 48px); overflow-y: auto; flex-shrink: 0; }
+  #multiplayer-menu p { margin: 8px 0; font-size: 14px; }
+  #multiplayer-menu input { max-width: 100%; box-sizing: border-box; }
   .fe-wordmark {
     margin: 0; font-size: clamp(26px, 4.6vw, 56px); line-height: 1; font-weight: 600;
     letter-spacing: .32em; text-indent: .32em; color: #f2f8ff;
@@ -504,12 +507,12 @@
         <p class="fe-prompt">Click to play</p>
         <button type="button" class="fe-btn" data-action="class">Create a class</button>
         <details id="multiplayer-menu"><summary class="fe-btn">Multiplayer</summary>
-<label>Room server <input id="mp-server" type="url" placeholder="https://your-room-worker.workers.dev"></label>
-<label>Room code <input id="mp-code" maxlength="8" placeholder="Eight-character code"></label>
+<details id="mp-advanced"><summary>Advanced: custom server</summary><label>Room server <input id="mp-server" type="url" placeholder="https://your-room-worker.workers.dev"></label></details>
+<label>Room code <input id="mp-code" maxlength="16" placeholder="Choose a code, e.g. FRIENDS"></label><p>Host: choose a code or leave blank to generate one. Guests: enter the host’s code.</p>
 <button class="fe-btn" id="mp-create" type="button">Create Room</button>
 <button class="fe-btn" id="mp-join" type="button">Join Room</button>
-<button class="fe-btn" id="mp-leave" type="button">Leave room / Single player</button>
-<p id="mp-status" role="status">Online rooms need a separate hosted room server. GitHub Pages hosts the game only.</p></details>
+<button class="fe-btn" id="mp-leave" type="button">Back to main menu</button>
+<p id="mp-status" role="status">Uses the shared online server. Share your room code with a friend.</p></details>
 <p class="fe-count" id="fe-count" hidden></p>
       </div>
     </div>
@@ -1288,19 +1291,19 @@ const multiplayer = new MultiplayerClient(client => {
   document.getElementById('mp-status').textContent = client.status === 'error'
     ? client.error
     : client.active ? client.status + ' · Room ' + client.code + (client.status === 'connected' ? ' · Click to play' : '')
-    : client.status === 'offline' ? 'Single player · Online rooms require a separate hosted room server.' : client.status;
+    : client.status === 'offline' ? 'Single player · Create or join a room on the shared online server.' : client.status;
 });
 const serverInput = document.getElementById('mp-server');
 const localGame = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 let savedRoomServer = '';
 try { savedRoomServer = localStorage.getItem('cod:room-server') || ''; } catch {}
 if (!localGame && /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(savedRoomServer)) savedRoomServer = '';
-serverInput.value = savedRoomServer || ROOM_SERVER_URL || (localGame ? 'http://localhost:8787' : '');
+serverInput.value = savedRoomServer || (localGame ? 'http://localhost:8787' : ROOM_SERVER_URL);
 async function enterRoom(create) {
   if (!ready || !enemies) return;
   try {
     try { localStorage.setItem('cod:room-server', serverInput.value.trim()); } catch {}
-    const connected = await multiplayer.connect(serverInput.value, create ? '' : document.getElementById('mp-code').value);
+    const connected = await multiplayer.connect(serverInput.value, document.getElementById('mp-code').value, create);
     if (!connected) return;
     document.getElementById('mp-code').value = multiplayer.code;
     match.reset();
@@ -1309,9 +1312,10 @@ async function enterRoom(create) {
 }
 function leaveRoom(event) {
   event?.stopPropagation();
+  const wasInRoom = multiplayer.active;
   multiplayer.leave();
   suspendPlay();
-  restartMatch();
+  if (wasInRoom) { enemies?.setEnabled(true); restartMatch(); }
   frontend.returnToTitle();
   document.getElementById('mp-code').value = '';
   document.getElementById('multiplayer-menu').open = true;
@@ -1887,7 +1891,12 @@ function getDebugState() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   return {
     ready,
-    multiplayer: multiplayer.getState(),
+    multiplayer: { ...multiplayer.getState(), bots: {
+      active: enemies?.enemies.length ?? 0,
+      hitTargets: enemies?.hitTargets.length ?? 0,
+      attachedRoots: [...(enemies?.enemies ?? []), ...(enemies?.suspendedEnemies ?? [])].filter(enemy => enemy.root.parent !== null).length,
+      agents: [...(enemies?.enemies ?? []), ...(enemies?.suspendedEnemies ?? [])].filter(enemy => enemy.agent).length,
+    } },
     active: locked,
     paused: automationPaused,
     input: { touch: touchControls.getState(), mouseCaptureFallback },
@@ -2434,7 +2443,7 @@ function tick() {
   }
   if (simulationActive) navigation?.update(1 / 60, dt, 5);
   if (enemies) {
-    for (const enemy of enemies.enemies) enemy.root.visible = !multiplayer.active;
+    enemies.setEnabled(!multiplayer.active);
     if (!multiplayer.active) enemies.update(dt, { active: simulationActive });
     multiplayerAvatars ??= new MultiplayerAvatars(scene, enemies);
     multiplayerAvatars.update(multiplayer, dt);
