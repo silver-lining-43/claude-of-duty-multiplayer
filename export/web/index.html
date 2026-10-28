@@ -503,13 +503,21 @@
       <div class="fe-start-foot">
         <p class="fe-prompt">Click to play</p>
         <button type="button" class="fe-btn" data-action="class">Create a class</button>
-        <p class="fe-count" id="fe-count" hidden></p>
+        <details id="multiplayer-menu"><summary class="fe-btn">Multiplayer</summary>
+<label>Room server <input id="mp-server" type="url" placeholder="https://your-room-worker.workers.dev"></label>
+<label>Room code <input id="mp-code" maxlength="8" placeholder="Eight-character code"></label>
+<button class="fe-btn" id="mp-create" type="button">Create Room</button>
+<button class="fe-btn" id="mp-join" type="button">Join Room</button>
+<button class="fe-btn" id="mp-leave" type="button">Leave room / Single player</button>
+<p id="mp-status" role="status">Movement only; combat is disabled in rooms.</p></details>
+<p class="fe-count" id="fe-count" hidden></p>
       </div>
     </div>
     <div class="fe-pause">
       <h2 class="fe-heading">Paused</h2>
       <div class="fe-buttons">
         <button type="button" class="fe-btn" data-action="resume">Resume</button>
+        <button type="button" class="fe-btn" id="mp-pause-leave">Leave room / Single player</button>
         <button type="button" class="fe-btn" data-action="class">Create a class</button>
         <button type="button" class="fe-btn" data-action="respawn">Respawn</button>
         <button type="button" class="fe-btn" data-action="navmesh">Navmesh overlay</button>
@@ -643,6 +651,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { MultiplayerClient } from './multiplayer-client.js';
+import { MultiplayerAvatars } from './multiplayer-avatars.js';
 import { PlayerController } from './player-controller.js';
 import { loadNavigation } from './navigation.js';
 import { Viewmodel } from './viewmodel.js';
@@ -1272,6 +1282,28 @@ let navigationVisible = false;
 let collisionVisible = false;
 let pathPoints = 0;
 let enemies = null;
+let multiplayerAvatars = null;
+const multiplayer = new MultiplayerClient(client => {
+ document.getElementById('mp-status').textContent = client.status + (client.active ? ' · Room ' + client.code + ' · Click to play' : ' · Single player');
+});
+const serverInput = document.getElementById('mp-server');
+serverInput.value = localStorage.getItem('cod:room-server') || 'http://localhost:8787';
+async function enterRoom(create) {
+ if (!ready || !enemies) return;
+ try {
+  localStorage.setItem('cod:room-server', serverInput.value);
+  await multiplayer.connect(serverInput.value, create ? '' : document.getElementById('mp-code').value);
+  document.getElementById('mp-code').value = multiplayer.code;
+  match.reset();
+  playerHealth.respawn();
+ } catch (error) { document.getElementById('mp-status').textContent = error.message; }
+}
+for (const id of ['multiplayer-menu']) document.getElementById(id).addEventListener('click', event => event.stopPropagation());
+document.getElementById('mp-create').onclick = () => enterRoom(true);
+document.getElementById('mp-join').onclick = () => enterRoom(false);
+document.getElementById('mp-leave').onclick = () => { multiplayer.leave(); restartMatch(); };
+document.getElementById('mp-pause-leave').onclick = event => { event.stopPropagation(); multiplayer.leave(); restartMatch(); };
+window.addEventListener('pagehide', () => multiplayer.leave());
 let playerHealth = null;
 let hitmarkerLife = 0;
 let hitmarkerMaxLife = 0.18;
@@ -1580,6 +1612,12 @@ function restartMatch() {
 }
 
 function renderMatchUi() {
+  if (multiplayer.active) {
+    matchStatus.textContent = 'Room ' + multiplayer.code + ' · ' + multiplayer.status + ' · ' + (multiplayer.peers.size + 1) + '/2 · Movement only';
+    scoreboard.classList.remove('visible');
+    killfeed.replaceChildren();
+    return;
+  }
   const state = match.getState();
   const playerEntry = state.standings.find((entry) => entry.id === 'player');
   const minutes = Math.floor(state.remainingSeconds / 60);
@@ -1745,6 +1783,7 @@ function showHitmarker(kind) {
 }
 
 function fireShot({ triggerShotCount = 0 } = {}) {
+  if (multiplayer.active) return;
   const intro = activeWeaponSlot.definition.initialShotCount > 0 && triggerShotCount === 1;
   if (!viewmodel.fire({ intro })) return;
   if (playerHealth?.protectionTimer > 0) playerHealth.protectionTimer = 0;
@@ -1830,6 +1869,7 @@ function getDebugState() {
   const size = renderer.getDrawingBufferSize(new THREE.Vector2());
   return {
     ready,
+    multiplayer: multiplayer.getState(),
     active: locked,
     paused: automationPaused,
     input: { touch: touchControls.getState(), mouseCaptureFallback },
@@ -1933,6 +1973,7 @@ function getDebugState() {
 function createDebugApi() {
   return {
     getState: getDebugState,
+    disconnectMultiplayer() { multiplayer.socket?.close(4000, 'Connection interrupted'); },
     setGraphicsPreset,
     // Exercise the post-match shell without waiting for the five-minute clock.
     finishMatch() {
@@ -2368,15 +2409,27 @@ function tick() {
     crouch: Boolean(keys.ControlLeft || keys.ControlRight || keys.KeyC || touch.crouch),
     jump: Boolean(keys.Space || touch.jump),
   };
-  weapon.setTrigger(controlsActive && (mouseFire || touch.fire));
+  weapon.setTrigger(!multiplayer.active && controlsActive && (mouseFire || touch.fire));
   viewmodel.setAiming(controlsActive && (mouseAim || touch.aim));
   if (player && simulationActive) {
     player.update(dt, controlsActive ? movement : {});
   }
   if (simulationActive) navigation?.update(1 / 60, dt, 5);
-  enemies?.update(dt, { active: simulationActive });
+  if (enemies) {
+    for (const enemy of enemies.enemies) enemy.root.visible = !multiplayer.active;
+    if (!multiplayer.active) enemies.update(dt, { active: simulationActive });
+    multiplayerAvatars ??= new MultiplayerAvatars(scene, enemies);
+    multiplayerAvatars.update(multiplayer, dt);
+  }
+  if (player && multiplayer.active) {
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    multiplayer.send({ position: player.feetPosition.toArray(), yaw: Math.atan2(-forward.x, -forward.z),
+      moving: Math.hypot(player.velocity.x, player.velocity.z) > 5,
+      sprint: !!movement.sprint, crouch: !!player.crouched, grounded: !!player.isGrounded,
+      weapon: activeWeaponSlot.definition.id });
+  }
   playerHealth?.update(simulationActive ? dt : 0);
-  if (simulationActive) match.update(dt);
+  if (simulationActive && !multiplayer.active) match.update(dt);
   weaponEffects.update(dt);
   // Panned enemy fire is only meaningful while the listener tracks the camera.
   if (simulationActive) weaponEffects.updateListener(camera);
