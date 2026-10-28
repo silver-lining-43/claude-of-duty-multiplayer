@@ -55,6 +55,7 @@ test('two game browsers share movement, disconnect, and reconnect', { timeout: 2
   await Promise.all(pages.map(p => p.waitForFunction(() => globalThis.hijacked?.debug?.getState().ready, null, { timeout: 120000 })));
   for (const page of pages) {
     await page.locator('#multiplayer-menu').evaluate(e => e.open = true);
+    await page.locator('#mp-advanced').evaluate(e => e.open = true);
     await page.locator('#mp-server').fill('http://127.0.0.1:8788');
   }
   await a.locator('#mp-server').fill('');
@@ -62,12 +63,18 @@ test('two game browsers share movement, disconnect, and reconnect', { timeout: 2
   await a.waitForFunction(() => document.getElementById('mp-status').textContent.includes('GitHub Pages only hosts'));
   await a.screenshot({ path: out + '/missing-backend.png' });
   await a.locator('#mp-server').fill('http://127.0.0.1:8788');
+  await a.locator('#mp-code').fill('Friends-' + Date.now().toString(36));
+  const chosen = (await a.locator('#mp-code').inputValue()).toUpperCase();
   await a.locator('#mp-create').click();
   await a.waitForFunction(() => hijacked.debug.getState().multiplayer.status === 'connected');
+  assert.equal(await a.locator('#mp-code').inputValue(), chosen);
   const code = await a.locator('#mp-code').inputValue();
   await b.locator('#mp-code').fill(code);
+  const conflict = await fetch('http://127.0.0.1:8788/rooms', { method: 'POST', body: JSON.stringify({ code }) });
+  assert.equal(conflict.status, 409);
   await b.locator('#mp-join').click();
   await Promise.all(pages.map(p => p.waitForFunction(() => hijacked.debug.getState().multiplayer.peers.length === 1)));
+  await a.locator('#mp-advanced').evaluate(e => e.open = false);
   await a.screenshot({ path: `${out}/room-menu.png` });
   const denied = new WebSocket('ws://127.0.0.1:8788/rooms/' + code + '?token=' + crypto.randomUUID());
   const deniedMessage = await new Promise((resolve, reject) => {
@@ -108,6 +115,7 @@ test('two game browsers share movement, disconnect, and reconnect', { timeout: 2
   await b.waitForFunction(() => hijacked.debug.getState().multiplayer.peers.length === 0, null, { timeout: 60000 });
 
   await Promise.all(pages.map(p => p.waitForFunction(() => hijacked.debug.getState().multiplayer.peers.length === 1, null, { timeout: 30000 })));
+  for (const page of pages) assert.deepEqual(await page.evaluate(() => hijacked.debug.getState().multiplayer.bots), { active: 0, hitTargets: 0, attachedRoots: 0, agents: 0 });
   const states = await Promise.all(pages.map(p => p.evaluate(() => hijacked.debug.getState())));
   fs.writeFileSync(`${out}/state.json`, JSON.stringify(states, null, 2));
   fs.writeFileSync(`${out}/console.json`, JSON.stringify(errors, null, 2));
@@ -122,5 +130,12 @@ test('two game browsers share movement, disconnect, and reconnect', { timeout: 2
   await a.waitForTimeout(1800);
   assert.equal(await a.evaluate(() => hijacked.debug.getState().multiplayer.active), false);
   await a.screenshot({ path: out + '/left-room.png' });
+  assert.deepEqual(await a.evaluate(() => hijacked.debug.getState().multiplayer.bots), { active: 6, hitTargets: 18, attachedRoots: 6, agents: 6 });
+  await a.evaluate(() => hijacked.debug.setActive(true));
+  await a.evaluate(() => hijacked.debug.showMenu(true));
+  const feet = await a.evaluate(() => hijacked.debug.getState().player.feet);
+  await a.locator('#mp-pause-leave').click();
+  assert.equal(await a.evaluate(() => hijacked.debug.getState().menu.screen), 'title');
+  assert.deepEqual(await a.evaluate(() => hijacked.debug.getState().player.feet), feet, 'returning from bot mode must not respawn');
   assert.deepEqual(errors, []);
 });

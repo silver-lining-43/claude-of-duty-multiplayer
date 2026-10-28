@@ -18,6 +18,24 @@ test('network failure explains the missing or unreachable backend', async t => {
   assert.equal(client.active, false);
 });
 
+test('creating a chosen code sends that code and explains conflicts', async t => {
+  let sent;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    sent = JSON.parse(options.body);
+    return new Response('Room exists', { status: 409 });
+  });
+  const client = new MultiplayerClient();
+  await assert.rejects(client.connect('https://rooms.example', 'friends', true), /already in use/);
+  assert.deepEqual(sent, { code: 'FRIENDS' });
+  assert.equal(client.active, false);
+});
+
+test('join requires a code and invalid codes fail without making a room', async () => {
+  const client = new MultiplayerClient();
+  await assert.rejects(client.connect('https://rooms.example', '', false), /Enter the code/);
+  await assert.rejects(client.connect('https://rooms.example', 'bad code!', true), /3–16/);
+});
+
 test('public HTTPS sites reject local and static-site backend URLs', async t => {
   const original = globalThis.location;
   globalThis.location = new URL('https://silver-lining-43.github.io/claude-of-duty-multiplayer/');

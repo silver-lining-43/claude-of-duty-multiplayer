@@ -6,7 +6,7 @@ export class MultiplayerClient {
     this.status = 'offline';
     this.sequence = 0;
   }
-  async connect(endpoint, code = '') {
+  async connect(endpoint, code = '', create = !code) {
     this.leave();
     const generation = this.generation;
     const controller = this.pending = new AbortController();
@@ -21,17 +21,23 @@ export class MultiplayerClient {
       if (globalThis.location && !local(location.hostname) && local(url.hostname)) throw new Error('Localhost points to your own computer. Enter a hosted HTTPS room server URL for online play.');
       if (globalThis.location && url.origin === location.origin) throw new Error('The static game website cannot run multiplayer rooms. Enter the separate room server URL.');
       this.endpoint = url.origin;
-      this.setStatus(code ? 'connecting' : 'creating room');
-      if (!code) {
+      const requestedCode = String(code).trim().toUpperCase();
+      if (requestedCode && !/^[A-Z0-9-]{3,16}$/.test(requestedCode)) throw new Error('Use 3–16 letters, numbers or hyphens for the room code.');
+      if (!create && !requestedCode) throw new Error('Enter the code of the room you want to join.');
+      code = requestedCode;
+      this.setStatus(create ? 'creating room' : 'connecting');
+      if (create) {
         let response;
-        try { response = await fetch(this.endpoint + '/rooms', { method: 'POST', signal: controller.signal }); }
+        try { response = await fetch(this.endpoint + '/rooms', { method: 'POST', body: JSON.stringify({ code: requestedCode }), signal: controller.signal }); }
         catch { throw new Error('Cannot reach the room server. Check that it is running and allows this game website. GitHub Pages alone cannot host rooms.'); }
+        if (response.status === 409) throw new Error('That room code is already in use. Join it or choose another code.');
         if (!response.ok) throw new Error('Room server returned HTTP ' + response.status + '. Check its URL and allowed website origins.');
         try { code = (await response.json()).code; } catch { throw new Error('This URL did not return a room. Enter the room backend URL, not the game website.'); }
       }
       if (generation !== this.generation) return false;
       this.code = String(code ?? '').trim().toUpperCase();
-      if (!/^[A-Z0-9]{8}$/.test(this.code)) throw new Error('Room codes contain eight letters or digits');
+      if (!/^[A-Z0-9-]{3,16}$/.test(this.code)) throw new Error('Room codes use 3–16 letters, numbers or hyphens.');
+      if (create && requestedCode && this.code !== requestedCode) throw new Error('The room server needs the latest update to support chosen room codes.');
       this.active = true;
       this.token = crypto.randomUUID();
       await this.open(true);

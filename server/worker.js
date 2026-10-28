@@ -19,12 +19,22 @@ export default {
       'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Vary': 'Origin' };
     if (request.method === 'OPTIONS') return new Response(null, { headers });
     if (url.pathname === '/rooms' && request.method === 'POST') {
-      const code = crypto.randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase();
-      const room = env.ROOMS.get(env.ROOMS.idFromName(code));
-      await room.fetch(new Request('https://room/init', { method: 'POST' }));
-      return Response.json({ code }, { headers });
+      const body = await request.text();
+      if (body.length > 128) return new Response('Request too large', { status: 413, headers });
+      let requested = '';
+      try { requested = String(body ? JSON.parse(body).code ?? '' : '').trim().toUpperCase(); }
+      catch { return new Response('Invalid room request', { status: 400, headers }); }
+      if (requested && !/^[A-Z0-9-]{3,16}$/.test(requested)) return new Response('Invalid room code', { status: 400, headers });
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const code = requested || crypto.randomUUID().replaceAll('-', '').slice(0, 8).toUpperCase();
+        const room = env.ROOMS.get(env.ROOMS.idFromName(code));
+        const result = await room.fetch(new Request('https://room/init', { method: 'POST' }));
+        if (result.ok) return Response.json({ code }, { headers });
+        if (requested) return new Response('Room code already in use', { status: 409, headers });
+      }
+      return new Response('Could not allocate a room', { status: 503, headers });
     }
-    const match = /^\/rooms\/([A-Z0-9]{8})$/.exec(url.pathname);
+    const match = /^\/rooms\/([A-Z0-9-]{3,16})$/.exec(url.pathname);
     if (!match) return new Response('Not found', { status: 404, headers });
     return env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
   },
@@ -33,9 +43,13 @@ export default {
 export class Room extends DurableObject {
   async fetch(request) {
     if (new URL(request.url).pathname === '/init') {
-      await this.ctx.storage.put('expires', Date.now() + TTL);
-      await this.ctx.storage.setAlarm(Date.now() + 30000);
-      return new Response('ok');
+      return this.ctx.blockConcurrencyWhile(async () => {
+        if ((await this.ctx.storage.get('expires') ?? 0) > Date.now() || this.ctx.getWebSockets().length) return new Response('Room exists', { status: 409 });
+        await this.ctx.storage.deleteAll();
+        await this.ctx.storage.put('expires', Date.now() + TTL);
+        await this.ctx.storage.setAlarm(Date.now() + 30000);
+        return new Response('ok');
+      });
     }
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('WebSocket required', { status: 426 });
     const pair = new WebSocketPair();
