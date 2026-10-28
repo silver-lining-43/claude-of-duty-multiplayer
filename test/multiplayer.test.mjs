@@ -57,6 +57,11 @@ test('two game browsers share movement, disconnect, and reconnect', { timeout: 2
     await page.locator('#multiplayer-menu').evaluate(e => e.open = true);
     await page.locator('#mp-server').fill('http://127.0.0.1:8788');
   }
+  await a.locator('#mp-server').fill('');
+  await a.locator('#mp-create').click();
+  await a.waitForFunction(() => document.getElementById('mp-status').textContent.includes('GitHub Pages only hosts'));
+  await a.screenshot({ path: out + '/missing-backend.png' });
+  await a.locator('#mp-server').fill('http://127.0.0.1:8788');
   await a.locator('#mp-create').click();
   await a.waitForFunction(() => hijacked.debug.getState().multiplayer.status === 'connected');
   const code = await a.locator('#mp-code').inputValue();
@@ -107,5 +112,15 @@ test('two game browsers share movement, disconnect, and reconnect', { timeout: 2
   fs.writeFileSync(`${out}/state.json`, JSON.stringify(states, null, 2));
   fs.writeFileSync(`${out}/console.json`, JSON.stringify(errors, null, 2));
   assert.equal(states[0].multiplayer.code, states[1].multiplayer.code);
+  await a.evaluate(() => hijacked.debug.showMenu(true));
+  await a.locator('#mp-pause-leave').click();
+  await a.waitForFunction(() => {
+    const state = hijacked.debug.getState();
+    return !state.multiplayer.active && state.multiplayer.status === 'offline' && state.multiplayer.code === null && state.menu.screen === 'title' && !state.active;
+  });
+  await b.waitForFunction(() => hijacked.debug.getState().multiplayer.peers.length === 0);
+  await a.waitForTimeout(1800);
+  assert.equal(await a.evaluate(() => hijacked.debug.getState().multiplayer.active), false);
+  await a.screenshot({ path: out + '/left-room.png' });
   assert.deepEqual(errors, []);
 });

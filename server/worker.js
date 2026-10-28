@@ -78,7 +78,7 @@ export class Room extends DurableObject {
   }
   webSocketClose(socket, code) {
     const peer = socket.deserializeAttachment();
-    socket.close(code === 1006 ? 1000 : code);
+    socket.close([1005, 1006, 1015].includes(code) ? 1000 : code);
     if (peer && !this.ctx.getWebSockets().some(s => s !== socket && s.deserializeAttachment()?.id === peer.id)) this.broadcast({ v: 1, type: 'leave', id: peer.id }, socket);
   }
   webSocketError(socket) { socket.close(1011, 'Connection error'); }

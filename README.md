@@ -323,6 +323,10 @@ rather than the original engine collision.
 Single-player remains the default, with the original six AI bots and combat.
 Open **Multiplayer** on the title screen, enter the room server URL, then choose
 **Create Room** or enter the eight-character code and choose **Join Room**.
+GitHub Pages alone cannot provide online multiplayer: it only serves static files.
+You must also run a separate WebSocket room backend. No backend has been deployed
+as part of this change. On public sites the server field stays empty until configured;
+it never defaults to a server on each visitor's own computer.
 Share both the server URL and room code with your friend. Once connected, click
 to play. Escape opens the pause menu, including **Leave room / Single player**.
 Rooms support two players. Bots, local shooting and the match clock are disabled
@@ -359,7 +363,10 @@ No backend is deployed by installing dependencies, running tests, or opening a P
 3. When ready to deploy yourself, run
    `npx wrangler deploy --config server/wrangler.jsonc`.
    The SQLite Durable Object migration provisions the room namespace.
-4. Enter the resulting `https://…workers.dev` URL in the Multiplayer menu on
+4. Optionally set `ROOM_SERVER_URL` in `export/web/multiplayer-config.js` to the
+   deployed server origin before publishing the frontend, so players do not need
+   to enter it themselves. The input can still override it.
+5. Enter the resulting `https://…workers.dev` URL in the Multiplayer menu on
    each computer. The URL is remembered locally. HTTPS frontends require an
    HTTPS backend; the client derives the secure WebSocket URL automatically.
 

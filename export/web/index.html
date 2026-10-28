@@ -509,7 +509,7 @@
 <button class="fe-btn" id="mp-create" type="button">Create Room</button>
 <button class="fe-btn" id="mp-join" type="button">Join Room</button>
 <button class="fe-btn" id="mp-leave" type="button">Leave room / Single player</button>
-<p id="mp-status" role="status">Movement only; combat is disabled in rooms.</p></details>
+<p id="mp-status" role="status">Online rooms need a separate hosted room server. GitHub Pages hosts the game only.</p></details>
 <p class="fe-count" id="fe-count" hidden></p>
       </div>
     </div>
@@ -651,6 +651,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { ROOM_SERVER_URL } from './multiplayer-config.js';
 import { MultiplayerClient } from './multiplayer-client.js';
 import { MultiplayerAvatars } from './multiplayer-avatars.js';
 import { PlayerController } from './player-controller.js';
@@ -1284,25 +1285,42 @@ let pathPoints = 0;
 let enemies = null;
 let multiplayerAvatars = null;
 const multiplayer = new MultiplayerClient(client => {
- document.getElementById('mp-status').textContent = client.status + (client.active ? ' · Room ' + client.code + ' · Click to play' : ' · Single player');
+  document.getElementById('mp-status').textContent = client.status === 'error'
+    ? client.error
+    : client.active ? client.status + ' · Room ' + client.code + (client.status === 'connected' ? ' · Click to play' : '')
+    : client.status === 'offline' ? 'Single player · Online rooms require a separate hosted room server.' : client.status;
 });
 const serverInput = document.getElementById('mp-server');
-serverInput.value = localStorage.getItem('cod:room-server') || 'http://localhost:8787';
+const localGame = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+let savedRoomServer = '';
+try { savedRoomServer = localStorage.getItem('cod:room-server') || ''; } catch {}
+if (!localGame && /^http:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(savedRoomServer)) savedRoomServer = '';
+serverInput.value = savedRoomServer || ROOM_SERVER_URL || (localGame ? 'http://localhost:8787' : '');
 async function enterRoom(create) {
- if (!ready || !enemies) return;
- try {
-  localStorage.setItem('cod:room-server', serverInput.value);
-  await multiplayer.connect(serverInput.value, create ? '' : document.getElementById('mp-code').value);
-  document.getElementById('mp-code').value = multiplayer.code;
-  match.reset();
-  playerHealth.respawn();
- } catch (error) { document.getElementById('mp-status').textContent = error.message; }
+  if (!ready || !enemies) return;
+  try {
+    try { localStorage.setItem('cod:room-server', serverInput.value.trim()); } catch {}
+    const connected = await multiplayer.connect(serverInput.value, create ? '' : document.getElementById('mp-code').value);
+    if (!connected) return;
+    document.getElementById('mp-code').value = multiplayer.code;
+    match.reset();
+    playerHealth.respawn();
+  } catch (error) { document.getElementById('mp-status').textContent = error.message; }
 }
-for (const id of ['multiplayer-menu']) document.getElementById(id).addEventListener('click', event => event.stopPropagation());
+function leaveRoom(event) {
+  event?.stopPropagation();
+  multiplayer.leave();
+  suspendPlay();
+  restartMatch();
+  frontend.returnToTitle();
+  document.getElementById('mp-code').value = '';
+  document.getElementById('multiplayer-menu').open = true;
+}
+document.getElementById('multiplayer-menu').addEventListener('click', event => event.stopPropagation());
 document.getElementById('mp-create').onclick = () => enterRoom(true);
 document.getElementById('mp-join').onclick = () => enterRoom(false);
-document.getElementById('mp-leave').onclick = () => { multiplayer.leave(); restartMatch(); };
-document.getElementById('mp-pause-leave').onclick = event => { event.stopPropagation(); multiplayer.leave(); restartMatch(); };
+document.getElementById('mp-leave').onclick = leaveRoom;
+document.getElementById('mp-pause-leave').onclick = leaveRoom;
 window.addEventListener('pagehide', () => multiplayer.leave());
 let playerHealth = null;
 let hitmarkerLife = 0;
