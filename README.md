@@ -318,6 +318,84 @@ rather than the original engine collision.
 
 ## Tests
 
+## Multiplayer foundation (movement only)
+
+Single-player remains the default, with the original six AI bots and combat.
+Open **Multiplayer** on the title screen, enter the room server URL, then choose
+**Create Room** or enter the eight-character code and choose **Join Room**.
+Share both the server URL and room code with your friend. Once connected, click
+to play. Escape opens the pause menu, including **Leave room / Single player**.
+Rooms support two players. Bots, local shooting and the match clock are disabled
+while in a room. The status bar shows the room code and connection status.
+
+Local development (Node 22+, Chrome or Edge):
+
+```powershell
+npm ci
+npm run mp:dev
+# In a second terminal:
+python -m http.server 8000 --directory export/web
+# Open http://localhost:8000 in two browsers; room server is http://localhost:8787
+npm run test:multiplayer
+```
+
+The multiplayer test starts its own frontend on port 8000 and a local Worker on
+8788; stop a manually running frontend first. It drives two isolated Playwright
+browser contexts through the real game and saves screenshots and state under
+`artifacts/multiplayer`. Set `BROWSER_PATH` if Chrome/Edge is installed elsewhere.
+For two computers on a LAN, bind the frontend and Worker to the LAN interface,
+add the frontend's exact origin to `server/wrangler.jsonc` `ALLOWED_ORIGINS`, and
+use the host's LAN address for both URLs. Allow the ports through the local firewall.
+
+### Cloudflare room backend (manual deployment)
+
+The backend is a separate Worker; GitHub Pages continues serving static files.
+No backend is deployed by installing dependencies, running tests, or opening a PR.
+
+1. In `server/wrangler.jsonc`, choose a unique Worker name and set
+   `ALLOWED_ORIGINS` to the exact frontend origins you intend to allow (no paths).
+   The fork's GitHub Pages origin is included as an example.
+2. Authenticate with `npx wrangler login` using your Cloudflare account.
+3. When ready to deploy yourself, run
+   `npx wrangler deploy --config server/wrangler.jsonc`.
+   The SQLite Durable Object migration provisions the room namespace.
+4. Enter the resulting `https://…workers.dev` URL in the Multiplayer menu on
+   each computer. The URL is remembered locally. HTTPS frontends require an
+   HTTPS backend; the client derives the secure WebSocket URL automatically.
+
+The Worker uses the [Durable Object WebSocket hibernation API](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).
+Room existence expires after 30 minutes without movement/heartbeat traffic;
+alarms evict stale sockets and remove expired empty room storage. Open clients
+send state at 20 Hz even when paused. Reconnect retries every 1.5 seconds with
+the same per-session token; full/expired/invalid rooms report an error and stop
+retrying. Reloading the page requires joining again. Background tab throttling
+may disconnect a client, which rejoins when its timers resume.
+
+### Protocol and next stage
+
+`POST /rooms` creates a random room code; `GET /rooms/CODE?token=UUID` upgrades
+to WebSocket. Protocol v1 supports server `welcome`, `state`, and `leave`
+messages and client `{v:1,type:'state',seq,state}` messages only. State carries
+feet position, yaw, moving/sprint/crouch/grounded flags and weapon ID. The server
+assigns identity from the session, bounds and validates state, rejects old
+sequences, limits payloads and update frequency, and enforces room capacity.
+It does not trust a client-supplied peer ID. Origin restrictions are not account
+authentication; room codes are invitation secrets for this prototype.
+
+The dedicated client buffers snapshots with a 100 ms interpolation delay and
+shortest-arc rotation. Render-only actors clone the bots' PLA rig and reuse its
+standing/run clips and calibrated M27 weapon attachment. Sprint changes animation
+speed, crouch compresses the rig, and jumps follow networked feet height. Weapon
+selection is synchronized, while all remote weapons use the shared M27 world
+model in this milestone. Dedicated crouch/jump clips and per-weapon world art
+remain follow-up work.
+
+Movement is client-authoritative in v1: there is no anti-cheat or server physics.
+Combat packets are rejected. The room manager is the future authority boundary:
+add input/shot commands, server ticks, hit validation, health/respawn events and
+score snapshots there, rather than allowing clients to publish damage or kills.
+Remote actors are intentionally absent from local bot hit targets.
+
 Run fast collision and navmesh tests with:
 
 ```powershell
